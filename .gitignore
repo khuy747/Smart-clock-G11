@@ -1,0 +1,109 @@
+# =============================================
+# .gitignore — Embedded & Robotics Project
+# =============================================
+
+# =====================
+# C / C++ (Firmware)
+# =====================
+*.o
+*.obj
+*.elf
+*.bin
+*.hex
+*.map
+*.lst
+*.d
+*.su
+*.i
+*.out
+*.a
+*.lib
+*.dll
+*.so
+*.dylib
+
+# Build directories
+build/
+out/
+Debug/
+Release/
+cmake-build-*/
+
+# =====================
+# IDE / Editor
+# =====================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.bak
+*.tmp
+
+# STM32CubeIDE
+*.launch
+.cproject
+.project
+.settings/
+
+# Keil uVision
+*.uvprojx
+*.uvoptx
+*.uvguix.*
+Listings/
+Objects/
+
+# =====================
+# Python
+# =====================
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+
+# Virtual environments
+venv/
+.venv/
+env/
+.env/
+
+# Distribution / packaging
+dist/
+*.egg-info/
+*.egg
+*.whl
+
+# Pytest / coverage
+.pytest_cache/
+htmlcov/
+.coverage
+.coverage.*
+
+# Jupyter Notebooks
+.ipynb_checkpoints/
+
+# =====================
+# OS Generated
+# =====================
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.lnk
+
+# =====================
+# Generated docs
+# =====================
+docs/_build/
+
+# =====================
+# Logs
+# =====================
+*.log
+
+# =====================
+# Hardware EDA (large generated files)
+# =====================
+# Uncomment if using KiCad:
+# *-backups/
+# fp-info-cache
+# *.kicad_prl
