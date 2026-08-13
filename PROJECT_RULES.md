@@ -124,7 +124,7 @@ Write code → Test pass → Write README.md → Commit with code
 
 
 
-## 4. Firmware Testing Conventions
+<!-- ## 4. Firmware Testing Conventions
 
 ### Approach: use `#ifdef TEST_<MODULE>`
 
@@ -172,9 +172,9 @@ int main(void) {
 
 ### Notes:
 - **Keep test code in main.c** — don't delete it, you may need to retest later
----
+--- -->
 
-## 5. Commit Message Conventions
+## 4. Commit Message Conventions
 
 ```
 [PREFIX] short description in English
