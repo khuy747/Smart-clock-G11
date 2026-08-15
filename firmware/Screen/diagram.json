@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "author": "Smart Clock ESP32-S3 Corrected",
+  "editor": "wokwi",
+  "parts": [
+    { "type": "board-esp32-s3-devkitc-1", "id": "esp", "top": 28.62, "left": 71.77, "attrs": {} },
+    {
+      "type": "wokwi-ili9341",
+      "id": "lcd1",
+      "top": -244.7,
+      "left": 145.2,
+      "rotate": 90,
+      "attrs": {}
+    },
+    { "type": "wokwi-ky-040", "id": "encoder1", "top": 59.3, "left": -87.2, "attrs": {} },
+    {
+      "type": "wokwi-buzzer",
+      "id": "bz1",
+      "top": -7.2,
+      "left": 213,
+      "attrs": { "volume": "0.1" }
+    }
+  ],
+  "connections": [
+    [ "esp:TX", "$serialMonitor:RX", "", [] ],
+    [ "esp:RX", "$serialMonitor:TX", "", [] ],
+    [ "bz1:2", "esp:41", "green", [ "v0" ] ],
+    [ "bz1:1", "esp:GND.2", "black", [ "v0" ] ],
+    [ "encoder1:GND", "esp:GND.1", "black", [ "h0" ] ],
+    [ "encoder1:VCC", "esp:3V3.1", "red", [ "h0" ] ],
+    [ "encoder1:CLK", "esp:1", "green", [ "h0" ] ],
+    [ "encoder1:DT", "esp:2", "green", [ "h0" ] ],
+    [ "encoder1:SW", "esp:4", "green", [ "h0" ] ],
+    [ "lcd1:VCC", "esp:3V3.1", "red", [ "h0" ] ],
+    [ "lcd1:GND", "esp:GND.1", "black", [ "h0" ] ],
+    [ "lcd1:CS", "esp:10", "green", [ "h0" ] ],
+    [ "lcd1:RST", "esp:8", "green", [ "h0" ] ],
+    [ "lcd1:D/C", "esp:9", "green", [ "h0" ] ],
+    [ "lcd1:MOSI", "esp:11", "green", [ "h0" ] ],
+    [ "lcd1:SCK", "esp:12", "green", [ "h0" ] ],
+    [ "lcd1:LED", "esp:3V3.1", "red", [ "h0" ] ]
+  ],
+  "dependencies": {}
+}

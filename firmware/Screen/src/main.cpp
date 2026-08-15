@@ -1,0 +1,821 @@
+#include <SPI.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_ILI9341.h>
+
+// ============================================================
+//                    PIN CONFIG (ESP32-S3)
+// ============================================================
+#define TFT_CS     10
+#define TFT_DC      9
+#define TFT_RST     8
+#define TFT_MOSI   11
+#define TFT_SCLK   12
+#define TFT_MISO   13
+#define TFT_LED     7  // Chân điều khiển đèn nền màn hình
+
+#define BUTTON_PIN  4
+#define ROTARY_CLK  1
+#define ROTARY_DT   2
+#define BUZZER_PIN 41
+
+// Khởi tạo Hardware SPI (Chỉ truyền CS, DC, RST)
+Adafruit_ILI9341 tft = Adafruit_ILI9341(TFT_CS, TFT_DC, TFT_RST);
+
+// ============================================================
+//                     COLORS
+// ============================================================
+#define BLACK   ILI9341_BLACK
+#define WHITE   ILI9341_WHITE
+#define CYAN    ILI9341_CYAN
+#define YELLOW  ILI9341_YELLOW
+#define GREEN   ILI9341_GREEN
+#define RED     ILI9341_RED
+#define BLUE    ILI9341_BLUE
+#define GREY    ILI9341_LIGHTGREY
+
+#define SCREEN_WIDTH  320
+#define SCREEN_HEIGHT 240
+
+int getTextWidth(const char* text, uint8_t textSize) {
+  return strlen(text) * 6 * textSize;
+}
+
+// ============================================================
+//                    SCREEN MODE
+// ============================================================
+enum ScreenMode {
+  SET_TIME_SCREEN,
+  TIME_SCREEN,
+  TODO_SCREEN,
+  ALARM_SCREEN,
+  RINGING_SCREEN
+};
+
+ScreenMode currentScreen = SET_TIME_SCREEN;
+
+// ============================================================
+//                  DISPLAY CONTROL
+// ============================================================
+bool displayOn = true; 
+unsigned long lastActivityTime = 0;
+const unsigned long SCREEN_TIMEOUT = 60000;
+
+// ============================================================
+//                        CLOCK
+// ============================================================
+bool clockRunning = false; 
+int currentHour   = 0;
+int currentMinute = 0;
+int currentSecond = 0;
+int lastMinuteDrawn = -1;
+
+int currentDay   = 28;
+int currentMonth = 7;
+int currentYear  = 2026;
+unsigned long lastClockUpdate = 0;
+
+int timeEditField = 0; // 0 = Giờ, 1 = Phút
+
+// ============================================================
+//                MULTI-ALARM SYSTEM
+// ============================================================
+struct AlarmItem {
+  int hour;
+  int minute;
+  bool enabled;
+};
+
+const int MAX_ALARMS = 5;
+AlarmItem alarms[MAX_ALARMS] = {
+  {0, 0, false},
+  {0, 0, false},
+  {0, 0, false},
+  {0, 0, false},
+  {0, 0, false}
+};
+
+int currentAlarmIndex = 0; 
+int alarmEditField = 0;    
+
+bool alarmRinging = false;
+int ringingAlarmId = -1;
+
+// ============================================================
+//                    BLINK CONTROL
+// ============================================================
+bool blinkState = true;
+unsigned long lastBlinkTime = 0;
+const unsigned long BLINK_INTERVAL = 500;
+
+// ============================================================
+//                  BUTTON DEBOUNCE
+// ============================================================
+bool lastButtonState = HIGH;
+bool lastFlickerableState = HIGH;
+unsigned long lastDebounceTime = 0;
+const unsigned long DEBOUNCE_DELAY = 50; 
+
+unsigned long buttonPressStartTime = 0;
+bool buttonIsPressed = false;
+
+bool waitingClickAction = false;
+unsigned long clickActionStartTime = 0;
+const unsigned long CLICK_TIMEOUT = 300;
+
+// ============================================================
+//                        ROTARY
+// ============================================================
+int rotaryLastState = 0;
+int rotaryAccumulator = 0;
+
+// ============================================================
+//                        TODO
+// ============================================================
+struct Task {
+  int hour;
+  int minute;
+  String name;
+  bool completed;
+};
+
+Task tasks[] = {
+  { 7,  0, "An sang",        false },
+  { 8,  0, "Hoc Toan",       false },
+  { 9,  0, "Hoc Vat Ly",     false },
+  {10, 30, "Nghi giai lao",  false },
+  {11,  0, "Hoc Hoa",        false },
+  {12,  0, "An trua",        false },
+  {13,  0, "Nghi trua",      false },
+  {14,  0, "Lam bai tap",    false },
+  {15,  0, "Lam du an",      false },
+  {16,  0, "Hoc tieng Anh",  false },
+  {17,  0, "The thao",       false },
+  {18, 30, "An toi",         false },
+  {20,  0, "Hoc bai",        false },
+  {21,  0, "Doc sach",       false }
+};
+
+const int TASK_COUNT = sizeof(tasks) / sizeof(tasks[0]);
+int selectedTask = 0; 
+int topTaskIndex = 0; 
+const int MAX_VISIBLE_TASKS = 7;
+
+// ============================================================
+//                    PROTOTYPES
+// ============================================================
+void drawTimeScreen();
+void updateTimeOnly();
+void drawAlarmScreen();
+void drawAlarmDigits();
+void drawSetTimeScreen();
+void drawSetTimeDigits();
+
+void registerActivity() {
+  if (!displayOn) return;
+  lastActivityTime = millis();
+}
+
+void checkDisplayTimeout() {
+  if (!displayOn) return;
+  if (currentScreen == RINGING_SCREEN) return;
+
+  if (millis() - lastActivityTime >= SCREEN_TIMEOUT) {
+    displayOn = false;
+    waitingClickAction = false;
+    buttonIsPressed = false;
+    tft.fillScreen(BLACK);
+    digitalWrite(TFT_LED, LOW); // Tắt đèn nền
+  }
+}
+
+void print2(int value) {
+  if (value < 10) tft.print("0");
+  tft.print(value);
+}
+
+void drawTitle(const char* title) {
+  tft.setTextColor(CYAN);
+  tft.setTextSize(3);
+  int w = getTextWidth(title, 3); 
+  tft.setCursor((SCREEN_WIDTH - w) / 2, 10);
+  tft.print(title);
+  tft.drawFastHLine(15, 48, 290, CYAN);
+}
+
+void drawDate() {
+  tft.setTextSize(2);
+  tft.setTextColor(GREY);
+  tft.setCursor(105, 125);
+  print2(currentDay); tft.print("/");
+  print2(currentMonth); tft.print("/");
+  tft.print(currentYear);
+}
+
+// ============================================================
+//                SET TIME SCREEN (STARTUP)
+// ============================================================
+void drawSetTimeDigits() {
+  tft.setTextSize(6);
+
+  // Cập nhật GIỜ
+  tft.setCursor(75, 90);
+  if (timeEditField == 0 && !blinkState) {
+    tft.setTextColor(BLACK, BLACK); // Vẽ số màu đen để giấu đi
+  } else {
+    tft.setTextColor(timeEditField == 0 ? YELLOW : WHITE, BLACK); // Vẽ số có nền đen đè lên
+  }
+  print2(currentHour);
+
+  // Cập nhật DẤU HAI CHẤM
+  tft.setTextColor(WHITE, BLACK);
+  tft.setCursor(145, 90);
+  tft.print(":");
+
+  // Cập nhật PHÚT
+  tft.setCursor(175, 90);
+  if (timeEditField == 1 && !blinkState) {
+    tft.setTextColor(BLACK, BLACK); // Vẽ số màu đen để giấu đi
+  } else {
+    tft.setTextColor(timeEditField == 1 ? YELLOW : WHITE, BLACK);
+  }
+  print2(currentMinute);
+}
+
+void drawSetTimeScreen() {
+  if (!displayOn) return;
+  tft.fillScreen(BLACK);
+  drawTitle("SET CLOCK");
+  drawSetTimeDigits();
+
+  tft.setTextSize(2);
+  tft.setTextColor(GREY);
+  tft.setCursor(110, 175);
+  if (timeEditField == 0) tft.print("Chinh Gio");
+  else tft.print("Chinh Phut");
+
+  tft.setTextSize(1);
+  tft.setCursor(40, 215);
+  tft.print("XOAY: CHINH | 1 LAN: LUU VA DEM");
+}
+
+// ============================================================
+//                  TIME SCREEN (HH:MM ONLY)
+// ============================================================
+void drawTimeScreen() {
+  if (!displayOn) return;
+
+  tft.fillScreen(BLACK);
+  drawTitle("TIME");
+
+  lastMinuteDrawn = currentMinute;
+
+  tft.setTextSize(5);
+  tft.setTextColor(WHITE);
+  
+  char timeText[8];
+  sprintf(timeText, "%02d:%02d", currentHour, currentMinute);
+  int w = getTextWidth(timeText, 5);
+  tft.setCursor((SCREEN_WIDTH - w) / 2, 70);
+  tft.print(timeText);
+
+  drawDate();
+
+  tft.setTextSize(2);
+  tft.setTextColor(YELLOW);
+  tft.setCursor(15, 155);
+  tft.print("TODO LIST");
+  tft.drawFastHLine(15, 175, 290, YELLOW);
+
+  int nearest[3] = { -1, -1, -1 };
+  int distanceList[3] = { 99999, 99999, 99999 };
+  int nowMinutes = currentHour * 60 + currentMinute;
+
+  for (int i = 0; i < TASK_COUNT; i++) {
+    if (tasks[i].completed) continue;
+    int taskMinutes = tasks[i].hour * 60 + tasks[i].minute;
+    int distance = taskMinutes - nowMinutes;
+    if (distance < 0) continue;
+    for (int j = 0; j < 3; j++) {
+      if (distance < distanceList[j]) {
+        for (int k = 2; k > j; k--) {
+          distanceList[k] = distanceList[k - 1];
+          nearest[k] = nearest[k - 1];
+        }
+        distanceList[j] = distance;
+        nearest[j] = i;
+        break;
+      }
+    }
+  }
+
+  for (int i = 0; i < 3; i++) {
+    if (nearest[i] == -1) continue;
+    int index = nearest[i];
+    int y = 182 + i * 18;
+
+    if (i == 0) tft.setTextColor(WHITE);
+    else tft.setTextColor(GREY);
+
+    tft.setTextSize(1);
+    tft.setCursor(15, y);
+    if (i == 0) tft.print(">"); else tft.print(" ");
+
+    tft.setCursor(30, y);
+    print2(tasks[index].hour); tft.print(":"); print2(tasks[index].minute);
+    tft.setCursor(75, y);
+    tft.print(tasks[index].name);
+  }
+}
+
+void updateTimeOnly() {
+  if (!displayOn || currentScreen != TIME_SCREEN) return;
+
+  if (currentMinute != lastMinuteDrawn) {
+    lastMinuteDrawn = currentMinute;
+    
+    tft.fillRect(40, 65, 240, 50, BLACK);
+    char timeText[8];
+    sprintf(timeText, "%02d:%02d", currentHour, currentMinute);
+    tft.setTextSize(5);
+    tft.setTextColor(WHITE);
+    int w = getTextWidth(timeText, 5);
+    tft.setCursor((SCREEN_WIDTH - w) / 2, 70);
+    tft.print(timeText);
+  }
+}
+
+// ============================================================
+//                    TODO SCREEN
+// ============================================================
+void drawTodoRow(int row, int index, bool isSelected) {
+  int y = 55 + row * 25;
+  tft.fillRect(5, y - 2, 310, 22, isSelected ? BLUE : BLACK);
+  if (index >= TASK_COUNT) return;
+
+  tft.setTextColor(isSelected ? WHITE : GREY);
+  tft.setTextSize(1);
+  tft.setCursor(12, y + 5);
+  tft.print(isSelected ? ">" : " ");
+  tft.setCursor(28, y + 5);
+  print2(tasks[index].hour); tft.print(":"); print2(tasks[index].minute);
+  tft.setCursor(75, y + 5);
+  tft.print(tasks[index].name);
+}
+
+void drawAllTodoItems() {
+  for (int row = 0; row < MAX_VISIBLE_TASKS; row++) {
+    int index = topTaskIndex + row;
+    drawTodoRow(row, index, index == selectedTask);
+  }
+}
+
+void initTodoScreen() {
+  if (!displayOn) return;
+  tft.fillScreen(BLACK);
+  drawTitle("TODO LIST");
+  drawAllTodoItems();
+}
+
+// ============================================================
+//               ALARM SCREEN (MULTI-ALARM)
+// ============================================================
+void drawAlarmDigits() {
+  tft.setTextSize(5);
+  uint16_t savedColor = (alarmEditField == 2) ? GREEN : WHITE;
+
+  // Cập nhật GIỜ
+  tft.setCursor(85, 85);
+  if (alarmEditField == 0 && !blinkState) {
+    tft.setTextColor(BLACK, BLACK);
+  } else {
+    tft.setTextColor(alarmEditField == 0 ? YELLOW : savedColor, BLACK);
+  }
+  print2(alarms[currentAlarmIndex].hour);
+
+  // Cập nhật DẤU HAI CHẤM
+  tft.setTextColor(savedColor, BLACK);
+  tft.setCursor(150, 85);
+  tft.print(":");
+
+  // Cập nhật PHÚT
+  tft.setCursor(180, 85);
+  if (alarmEditField == 1 && !blinkState) {
+    tft.setTextColor(BLACK, BLACK);
+  } else {
+    tft.setTextColor(alarmEditField == 1 ? YELLOW : savedColor, BLACK);
+  }
+  print2(alarms[currentAlarmIndex].minute);
+}
+
+void drawAlarmScreen() {
+  if (!displayOn) return;
+  tft.fillScreen(BLACK);
+  
+  char titleBuf[30];
+  sprintf(titleBuf, "SET ALARM (So %d)", currentAlarmIndex + 1);
+  drawTitle(titleBuf);
+  
+  drawAlarmDigits();
+
+  if (alarmEditField == 2) {
+    tft.setTextSize(2);
+    tft.setTextColor(GREEN);
+    tft.setCursor(55, 155);
+    tft.print("DA LUU BAO THUC SO ");
+    tft.print(currentAlarmIndex + 1);
+    
+    tft.setTextSize(1);
+    tft.setTextColor(YELLOW);
+    tft.setCursor(45, 195);
+    tft.print("XOAY: CHUYEN BAO THUC KHAC");
+    
+    tft.setTextSize(1);
+    tft.setTextColor(GREY);
+    tft.setCursor(75, 215);
+    tft.print("1 LAN HOAC 2 LAN: THOAT");
+  } else {
+    tft.setTextSize(2);
+    tft.setTextColor(GREY);
+    tft.setCursor(110, 155);
+    if (alarmEditField == 0) tft.print("Chinh Gio");
+    else tft.print("Chinh Phut");
+
+    tft.setTextSize(1);
+    tft.setTextColor(GREY);
+    tft.setCursor(30, 210);
+    tft.print("XOAY: CHINH | 1 LAN: LUU | 2 LAN: OUT");
+  }
+}
+
+// ============================================================
+//                    UPDATE BLINK
+// ============================================================
+void updateBlink() {
+  if (currentScreen == ALARM_SCREEN && alarmEditField < 2) {
+    if (millis() - lastBlinkTime >= BLINK_INTERVAL) {
+      lastBlinkTime = millis();
+      blinkState = !blinkState;
+      drawAlarmDigits();
+    }
+  } 
+  else if (currentScreen == SET_TIME_SCREEN) {
+    if (millis() - lastBlinkTime >= BLINK_INTERVAL) {
+      lastBlinkTime = millis();
+      blinkState = !blinkState;
+      drawSetTimeDigits();
+    }
+  }
+}
+
+// ============================================================
+//                    RINGING SCREEN
+// ============================================================
+void drawRingingScreen() {
+  tft.fillScreen(RED);
+  tft.setTextColor(WHITE);
+  tft.setTextSize(4);
+  tft.setCursor(75, 30);
+  tft.print("ALARM!");
+  
+  tft.setCursor(75, 90);
+  print2(alarms[ringingAlarmId].hour); tft.print(":"); print2(alarms[ringingAlarmId].minute);
+
+  tft.setTextSize(2);
+  tft.setCursor(55, 160);
+  tft.print("Bao thuc so "); tft.print(ringingAlarmId + 1);
+
+  tft.setCursor(60, 200);
+  tft.print("Nhan nut de tat");
+}
+
+// ============================================================
+//                    HANDLE ROTARY
+// ============================================================
+void handleRotary() {
+  int clk = digitalRead(ROTARY_CLK);
+  int dt = digitalRead(ROTARY_DT);
+  int currentState = (clk << 1) | dt;
+
+  if (currentState == rotaryLastState) return;
+
+  int movement = 0;
+  if ((rotaryLastState == 0 && currentState == 1) ||
+      (rotaryLastState == 1 && currentState == 3) ||
+      (rotaryLastState == 3 && currentState == 2) ||
+      (rotaryLastState == 2 && currentState == 0)) {
+    movement = 1;
+  }
+  else if ((rotaryLastState == 0 && currentState == 2) ||
+           (rotaryLastState == 2 && currentState == 3) ||
+           (rotaryLastState == 3 && currentState == 1) ||
+           (rotaryLastState == 1 && currentState == 0)) {
+    movement = -1;
+  }
+
+  rotaryLastState = currentState;
+  if (movement == 0) return;
+
+  rotaryAccumulator += movement;
+  if (abs(rotaryAccumulator) < 4) return;
+
+  int direction = rotaryAccumulator > 0 ? 1 : -1;
+  rotaryAccumulator = 0;
+
+  if (!displayOn) return;
+  registerActivity();
+
+  if (currentScreen == SET_TIME_SCREEN) {
+    if (timeEditField == 0) {
+      currentHour += direction;
+      if (currentHour > 23) currentHour = 0;
+      if (currentHour < 0) currentHour = 23;
+    } else {
+      currentMinute += direction;
+      if (currentMinute > 59) currentMinute = 0;
+      if (currentMinute < 0) currentMinute = 59;
+    }
+    drawSetTimeDigits();
+  }
+  else if (currentScreen == TODO_SCREEN) {
+    int oldSelectedTask = selectedTask;
+    if (direction > 0 && selectedTask < TASK_COUNT - 1) selectedTask++;
+    else if (direction < 0 && selectedTask > 0) selectedTask--;
+    
+    if (oldSelectedTask != selectedTask) {
+      bool needFullRedraw = false;
+      if (selectedTask < topTaskIndex) {
+        topTaskIndex = selectedTask;
+        needFullRedraw = true;
+      } else if (selectedTask >= topTaskIndex + MAX_VISIBLE_TASKS) {
+        topTaskIndex = selectedTask - MAX_VISIBLE_TASKS + 1;
+        needFullRedraw = true;
+      }
+
+      if (needFullRedraw) drawAllTodoItems();
+      else {
+        drawTodoRow(oldSelectedTask - topTaskIndex, oldSelectedTask, false);
+        drawTodoRow(selectedTask - topTaskIndex, selectedTask, true);
+      }
+    }
+  }
+  else if (currentScreen == ALARM_SCREEN) {
+    if (alarmEditField == 2) {
+      currentAlarmIndex += direction;
+      if (currentAlarmIndex >= MAX_ALARMS) currentAlarmIndex = 0;
+      if (currentAlarmIndex < 0) currentAlarmIndex = MAX_ALARMS - 1;
+      
+      alarmEditField = 0; 
+      blinkState = true;
+      lastBlinkTime = millis();
+      drawAlarmScreen();
+    } 
+    else {
+      if (alarmEditField == 0) {
+        alarms[currentAlarmIndex].hour += direction;
+        if (alarms[currentAlarmIndex].hour > 23) alarms[currentAlarmIndex].hour = 0;
+        if (alarms[currentAlarmIndex].hour < 0) alarms[currentAlarmIndex].hour = 23;
+      } else {
+        alarms[currentAlarmIndex].minute += direction;
+        if (alarms[currentAlarmIndex].minute > 59) alarms[currentAlarmIndex].minute = 0;
+        if (alarms[currentAlarmIndex].minute < 0) alarms[currentAlarmIndex].minute = 59;
+      }
+      drawAlarmDigits();
+    }
+  }
+}
+
+// ============================================================
+//                  BUTTON ACTIONS
+// ============================================================
+void executeSingleClick() {
+  registerActivity();
+
+  if (currentScreen == SET_TIME_SCREEN) {
+    timeEditField++;
+    if (timeEditField >= 2) {
+      clockRunning = true;
+      currentSecond = 0;
+      lastClockUpdate = millis();
+      currentScreen = TIME_SCREEN;
+      drawTimeScreen();
+    } else {
+      blinkState = true;
+      lastBlinkTime = millis();
+      drawSetTimeScreen();
+    }
+  }
+  else if (currentScreen == TIME_SCREEN) {
+    currentScreen = TODO_SCREEN;
+    selectedTask = 0;
+    topTaskIndex = 0;
+    initTodoScreen();
+  }
+  else if (currentScreen == TODO_SCREEN) {
+    currentScreen = ALARM_SCREEN;
+    currentAlarmIndex = 0; 
+    alarmEditField = 0; 
+    blinkState = true;
+    lastBlinkTime = millis();
+    drawAlarmScreen();
+  }
+  else if (currentScreen == ALARM_SCREEN) {
+    alarmEditField++;
+    if (alarmEditField == 2) {
+      alarms[currentAlarmIndex].enabled = true;
+      blinkState = true; 
+      drawAlarmScreen(); 
+    }
+    else if (alarmEditField >= 3) {
+      currentScreen = TIME_SCREEN;
+      drawTimeScreen();
+    } else {
+      blinkState = true;
+      lastBlinkTime = millis();
+      drawAlarmScreen();
+    }
+  }
+  else if (currentScreen == RINGING_SCREEN) {
+    alarmRinging = false;
+    alarms[ringingAlarmId].enabled = false; 
+    noTone(BUZZER_PIN);
+    currentScreen = TIME_SCREEN;
+    drawTimeScreen();
+  }
+}
+
+void executeDoubleClick() {
+  registerActivity();
+  if (currentScreen == ALARM_SCREEN || currentScreen == TODO_SCREEN) {
+    currentScreen = TIME_SCREEN;
+    drawTimeScreen();
+  }
+}
+
+void checkClickTimeout() {
+  if (waitingClickAction && (millis() - clickActionStartTime > CLICK_TIMEOUT)) {
+    waitingClickAction = false;
+    executeSingleClick();
+  }
+}
+
+void handleButton() {
+  bool currentState = digitalRead(BUTTON_PIN);
+
+  if (currentState != lastFlickerableState) {
+    lastDebounceTime = millis();
+    lastFlickerableState = currentState;
+  }
+
+  if ((millis() - lastDebounceTime) > DEBOUNCE_DELAY) {
+    if (currentState != lastButtonState) {
+      lastButtonState = currentState;
+
+      if (currentState == LOW) { 
+        buttonPressStartTime = millis();
+        buttonIsPressed = true;
+      } 
+      else if (currentState == HIGH) { 
+        if (buttonIsPressed) {
+          buttonIsPressed = false;
+          unsigned long pressTime = millis() - buttonPressStartTime;
+
+          if (!displayOn) {
+            displayOn = true;
+            digitalWrite(TFT_LED, HIGH); // Bật lại đèn nền
+            currentScreen = clockRunning ? TIME_SCREEN : SET_TIME_SCREEN;
+            if (clockRunning) drawTimeScreen(); else drawSetTimeScreen();
+            lastActivityTime = millis();
+            return;
+          }
+
+          if (pressTime >= 2000) {
+            if (currentScreen == TIME_SCREEN) {
+              waitingClickAction = false;
+              timeEditField = 0;
+              currentScreen = SET_TIME_SCREEN;
+              drawSetTimeScreen();
+            }
+          }
+          else if (pressTime < 1000) { 
+            unsigned long now = millis();
+            if (waitingClickAction && (now - clickActionStartTime <= CLICK_TIMEOUT)) {
+              waitingClickAction = false;
+              executeDoubleClick();
+            } else {
+              waitingClickAction = true;
+              clickActionStartTime = now;
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+// ============================================================
+//            UPDATE CLOCK (BACKGROUND)
+// ============================================================
+void updateClock() {
+  if (!clockRunning) return;
+
+  if (millis() - lastClockUpdate < 1000) return;
+  lastClockUpdate = millis();
+  
+  currentSecond++;
+  if (currentSecond >= 60) {
+    currentSecond = 0;
+    currentMinute++;
+    if (currentMinute >= 60) {
+      currentMinute = 0;
+      currentHour++;
+      if (currentHour >= 24) {
+        currentHour = 0;
+        currentDay++;
+      }
+    }
+  }
+
+  if (currentScreen == TIME_SCREEN) {
+    updateTimeOnly();
+  }
+}
+
+// ============================================================
+//                  CHECK MULTI-ALARM
+// ============================================================
+void checkAlarm() {
+  if (!clockRunning || alarmRinging) return;
+  for (int i = 0; i < MAX_ALARMS; i++) {
+    if (alarms[i].enabled) {
+      if (currentHour == alarms[i].hour && currentMinute == alarms[i].minute && currentSecond == 0) {
+        alarmRinging = true;
+        ringingAlarmId = i;
+        displayOn = true;
+        digitalWrite(TFT_LED, HIGH); // Sáng đèn nền nếu đang tắt
+        currentScreen = RINGING_SCREEN;
+        
+        drawRingingScreen();
+        tone(BUZZER_PIN, 1000);
+        break;
+      }
+    }
+  }
+}
+
+// ============================================================
+//                          SETUP
+// ============================================================
+void setup() {
+  Serial.begin(115200);
+
+  // Cấu hình chân Đèn nền màn hình
+  pinMode(TFT_LED, OUTPUT);
+  digitalWrite(TFT_LED, HIGH);
+
+  // BẮT BUỘC KHỞI TẠO HARDWARE SPI TRÊN ESP32-S3
+  SPI.begin(TFT_SCLK, TFT_MISO, TFT_MOSI, TFT_CS);
+
+  tft.begin(); 
+  tft.setRotation(1);
+  tft.fillScreen(BLACK);
+
+  pinMode(BUTTON_PIN, INPUT_PULLUP);
+  pinMode(ROTARY_CLK, INPUT_PULLUP);
+  pinMode(ROTARY_DT, INPUT_PULLUP);
+  
+  pinMode(BUZZER_PIN, OUTPUT);
+  noTone(BUZZER_PIN);
+
+  int clk = digitalRead(ROTARY_CLK);
+  int dt = digitalRead(ROTARY_DT);
+  rotaryLastState = (clk << 1) | dt;
+  lastButtonState = digitalRead(BUTTON_PIN);
+  lastFlickerableState = lastButtonState;
+
+  currentHour = 0;
+  currentMinute = 0;
+  currentSecond = 0;
+  clockRunning = false; 
+  timeEditField = 0;
+
+  displayOn = true;
+  currentScreen = SET_TIME_SCREEN;
+  lastActivityTime = millis();
+  
+  drawSetTimeScreen();
+
+  Serial.println("SMART CLOCK READY - HARDWARE SPI RUNNING");
+}
+
+// ============================================================
+//                          LOOP
+// ============================================================
+void loop() {
+  updateClock();
+  handleButton();
+  checkClickTimeout();
+  handleRotary();
+  updateBlink();       
+  checkAlarm();
+  checkDisplayTimeout();
+}
