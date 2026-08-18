@@ -1,6 +1,8 @@
 #include <SPI.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_ILI9341.h>
+#include <Wire.h>
+#include <RTClib.h>
 
 // ============================================================
 //                    PIN CONFIG (ESP32-S3)
@@ -18,11 +20,16 @@
 #define ROTARY_DT   2
 #define BUZZER_PIN 41
 
-// Khởi tạo Hardware SPI (Chỉ truyền CS, DC, RST)
+// Chân I2C cho DS3231 RTC
+#define I2C_SDA     5
+#define I2C_SCL     6
+
+// Khởi tạo Display & RTC
 Adafruit_ILI9341 tft = Adafruit_ILI9341(TFT_CS, TFT_DC, TFT_RST);
+RTC_DS3231 rtc;
 
 // ============================================================
-//                     COLORS
+//                         COLORS
 // ============================================================
 #define BLACK   ILI9341_BLACK
 #define WHITE   ILI9341_WHITE
@@ -41,7 +48,7 @@ int getTextWidth(const char* text, uint8_t textSize) {
 }
 
 // ============================================================
-//                    SCREEN MODE
+//                      SCREEN MODE
 // ============================================================
 enum ScreenMode {
   SET_TIME_SCREEN,
@@ -54,16 +61,16 @@ enum ScreenMode {
 ScreenMode currentScreen = SET_TIME_SCREEN;
 
 // ============================================================
-//                  DISPLAY CONTROL
+//                    DISPLAY CONTROL
 // ============================================================
-bool displayOn = true; 
+bool displayOn = true;
 unsigned long lastActivityTime = 0;
 const unsigned long SCREEN_TIMEOUT = 60000;
 
 // ============================================================
-//                        CLOCK
+//                           CLOCK
 // ============================================================
-bool clockRunning = false; 
+bool clockRunning = false;
 int currentHour   = 0;
 int currentMinute = 0;
 int currentSecond = 0;
@@ -77,7 +84,7 @@ unsigned long lastClockUpdate = 0;
 int timeEditField = 0; // 0 = Giờ, 1 = Phút
 
 // ============================================================
-//                MULTI-ALARM SYSTEM
+//                  MULTI-ALARM SYSTEM
 // ============================================================
 struct AlarmItem {
   int hour;
@@ -94,8 +101,8 @@ AlarmItem alarms[MAX_ALARMS] = {
   {0, 0, false}
 };
 
-int currentAlarmIndex = 0; 
-int alarmEditField = 0;    
+int currentAlarmIndex = 0;
+int alarmEditField = 0;
 
 bool alarmRinging = false;
 int ringingAlarmId = -1;
@@ -108,12 +115,12 @@ unsigned long lastBlinkTime = 0;
 const unsigned long BLINK_INTERVAL = 500;
 
 // ============================================================
-//                  BUTTON DEBOUNCE
+//                   BUTTON DEBOUNCE
 // ============================================================
 bool lastButtonState = HIGH;
 bool lastFlickerableState = HIGH;
 unsigned long lastDebounceTime = 0;
-const unsigned long DEBOUNCE_DELAY = 50; 
+const unsigned long DEBOUNCE_DELAY = 50;
 
 unsigned long buttonPressStartTime = 0;
 bool buttonIsPressed = false;
@@ -123,13 +130,13 @@ unsigned long clickActionStartTime = 0;
 const unsigned long CLICK_TIMEOUT = 300;
 
 // ============================================================
-//                        ROTARY
+//                           ROTARY
 // ============================================================
 int rotaryLastState = 0;
 int rotaryAccumulator = 0;
 
 // ============================================================
-//                        TODO
+//                           TODO
 // ============================================================
 struct Task {
   int hour;
@@ -156,8 +163,8 @@ Task tasks[] = {
 };
 
 const int TASK_COUNT = sizeof(tasks) / sizeof(tasks[0]);
-int selectedTask = 0; 
-int topTaskIndex = 0; 
+int selectedTask = 0;
+int topTaskIndex = 0;
 const int MAX_VISIBLE_TASKS = 7;
 
 // ============================================================
@@ -196,7 +203,7 @@ void print2(int value) {
 void drawTitle(const char* title) {
   tft.setTextColor(CYAN);
   tft.setTextSize(3);
-  int w = getTextWidth(title, 3); 
+  int w = getTextWidth(title, 3);
   tft.setCursor((SCREEN_WIDTH - w) / 2, 10);
   tft.print(title);
   tft.drawFastHLine(15, 48, 290, CYAN);
@@ -212,7 +219,7 @@ void drawDate() {
 }
 
 // ============================================================
-//                SET TIME SCREEN (STARTUP)
+//                SET TIME SCREEN (STARTUP/EDIT)
 // ============================================================
 void drawSetTimeDigits() {
   tft.setTextSize(6);
@@ -220,9 +227,9 @@ void drawSetTimeDigits() {
   // Cập nhật GIỜ
   tft.setCursor(75, 90);
   if (timeEditField == 0 && !blinkState) {
-    tft.setTextColor(BLACK, BLACK); // Vẽ số màu đen để giấu đi
+    tft.setTextColor(BLACK, BLACK);
   } else {
-    tft.setTextColor(timeEditField == 0 ? YELLOW : WHITE, BLACK); // Vẽ số có nền đen đè lên
+    tft.setTextColor(timeEditField == 0 ? YELLOW : WHITE, BLACK);
   }
   print2(currentHour);
 
@@ -234,7 +241,7 @@ void drawSetTimeDigits() {
   // Cập nhật PHÚT
   tft.setCursor(175, 90);
   if (timeEditField == 1 && !blinkState) {
-    tft.setTextColor(BLACK, BLACK); // Vẽ số màu đen để giấu đi
+    tft.setTextColor(BLACK, BLACK);
   } else {
     tft.setTextColor(timeEditField == 1 ? YELLOW : WHITE, BLACK);
   }
@@ -255,7 +262,7 @@ void drawSetTimeScreen() {
 
   tft.setTextSize(1);
   tft.setCursor(40, 215);
-  tft.print("XOAY: CHINH | 1 LAN: LUU VA DEM");
+  tft.print("XOAY: CHINH | 1 LAN: LUU DS3231");
 }
 
 // ============================================================
@@ -271,7 +278,7 @@ void drawTimeScreen() {
 
   tft.setTextSize(5);
   tft.setTextColor(WHITE);
-  
+
   char timeText[8];
   sprintf(timeText, "%02d:%02d", currentHour, currentMinute);
   int w = getTextWidth(timeText, 5);
@@ -332,7 +339,7 @@ void updateTimeOnly() {
 
   if (currentMinute != lastMinuteDrawn) {
     lastMinuteDrawn = currentMinute;
-    
+
     tft.fillRect(40, 65, 240, 50, BLACK);
     char timeText[8];
     sprintf(timeText, "%02d:%02d", currentHour, currentMinute);
@@ -410,11 +417,11 @@ void drawAlarmDigits() {
 void drawAlarmScreen() {
   if (!displayOn) return;
   tft.fillScreen(BLACK);
-  
+
   char titleBuf[30];
   sprintf(titleBuf, "SET ALARM (So %d)", currentAlarmIndex + 1);
   drawTitle(titleBuf);
-  
+
   drawAlarmDigits();
 
   if (alarmEditField == 2) {
@@ -423,12 +430,12 @@ void drawAlarmScreen() {
     tft.setCursor(55, 155);
     tft.print("DA LUU BAO THUC SO ");
     tft.print(currentAlarmIndex + 1);
-    
+
     tft.setTextSize(1);
     tft.setTextColor(YELLOW);
     tft.setCursor(45, 195);
     tft.print("XOAY: CHUYEN BAO THUC KHAC");
-    
+
     tft.setTextSize(1);
     tft.setTextColor(GREY);
     tft.setCursor(75, 215);
@@ -457,7 +464,7 @@ void updateBlink() {
       blinkState = !blinkState;
       drawAlarmDigits();
     }
-  } 
+  }
   else if (currentScreen == SET_TIME_SCREEN) {
     if (millis() - lastBlinkTime >= BLINK_INTERVAL) {
       lastBlinkTime = millis();
@@ -476,7 +483,7 @@ void drawRingingScreen() {
   tft.setTextSize(4);
   tft.setCursor(75, 30);
   tft.print("ALARM!");
-  
+
   tft.setCursor(75, 90);
   print2(alarms[ringingAlarmId].hour); tft.print(":"); print2(alarms[ringingAlarmId].minute);
 
@@ -540,7 +547,7 @@ void handleRotary() {
     int oldSelectedTask = selectedTask;
     if (direction > 0 && selectedTask < TASK_COUNT - 1) selectedTask++;
     else if (direction < 0 && selectedTask > 0) selectedTask--;
-    
+
     if (oldSelectedTask != selectedTask) {
       bool needFullRedraw = false;
       if (selectedTask < topTaskIndex) {
@@ -563,12 +570,12 @@ void handleRotary() {
       currentAlarmIndex += direction;
       if (currentAlarmIndex >= MAX_ALARMS) currentAlarmIndex = 0;
       if (currentAlarmIndex < 0) currentAlarmIndex = MAX_ALARMS - 1;
-      
-      alarmEditField = 0; 
+
+      alarmEditField = 0;
       blinkState = true;
       lastBlinkTime = millis();
       drawAlarmScreen();
-    } 
+    }
     else {
       if (alarmEditField == 0) {
         alarms[currentAlarmIndex].hour += direction;
@@ -593,9 +600,9 @@ void executeSingleClick() {
   if (currentScreen == SET_TIME_SCREEN) {
     timeEditField++;
     if (timeEditField >= 2) {
+      // Ghi cài đặt mới vào RTC DS3231
+      rtc.adjust(DateTime(currentYear, currentMonth, currentDay, currentHour, currentMinute, 0));
       clockRunning = true;
-      currentSecond = 0;
-      lastClockUpdate = millis();
       currentScreen = TIME_SCREEN;
       drawTimeScreen();
     } else {
@@ -612,8 +619,8 @@ void executeSingleClick() {
   }
   else if (currentScreen == TODO_SCREEN) {
     currentScreen = ALARM_SCREEN;
-    currentAlarmIndex = 0; 
-    alarmEditField = 0; 
+    currentAlarmIndex = 0;
+    alarmEditField = 0;
     blinkState = true;
     lastBlinkTime = millis();
     drawAlarmScreen();
@@ -622,8 +629,8 @@ void executeSingleClick() {
     alarmEditField++;
     if (alarmEditField == 2) {
       alarms[currentAlarmIndex].enabled = true;
-      blinkState = true; 
-      drawAlarmScreen(); 
+      blinkState = true;
+      drawAlarmScreen();
     }
     else if (alarmEditField >= 3) {
       currentScreen = TIME_SCREEN;
@@ -636,7 +643,7 @@ void executeSingleClick() {
   }
   else if (currentScreen == RINGING_SCREEN) {
     alarmRinging = false;
-    alarms[ringingAlarmId].enabled = false; 
+    alarms[ringingAlarmId].enabled = false;
     noTone(BUZZER_PIN);
     currentScreen = TIME_SCREEN;
     drawTimeScreen();
@@ -670,11 +677,11 @@ void handleButton() {
     if (currentState != lastButtonState) {
       lastButtonState = currentState;
 
-      if (currentState == LOW) { 
+      if (currentState == LOW) {
         buttonPressStartTime = millis();
         buttonIsPressed = true;
-      } 
-      else if (currentState == HIGH) { 
+      }
+      else if (currentState == HIGH) {
         if (buttonIsPressed) {
           buttonIsPressed = false;
           unsigned long pressTime = millis() - buttonPressStartTime;
@@ -696,7 +703,7 @@ void handleButton() {
               drawSetTimeScreen();
             }
           }
-          else if (pressTime < 1000) { 
+          else if (pressTime < 1000) {
             unsigned long now = millis();
             if (waitingClickAction && (now - clickActionStartTime <= CLICK_TIMEOUT)) {
               waitingClickAction = false;
@@ -713,27 +720,22 @@ void handleButton() {
 }
 
 // ============================================================
-//            UPDATE CLOCK (BACKGROUND)
+//            UPDATE CLOCK (DS3231 RTC SYNC)
 // ============================================================
 void updateClock() {
   if (!clockRunning) return;
 
-  if (millis() - lastClockUpdate < 1000) return;
+  // Đọc RTC theo chu kỳ 500ms
+  if (millis() - lastClockUpdate < 500) return;
   lastClockUpdate = millis();
-  
-  currentSecond++;
-  if (currentSecond >= 60) {
-    currentSecond = 0;
-    currentMinute++;
-    if (currentMinute >= 60) {
-      currentMinute = 0;
-      currentHour++;
-      if (currentHour >= 24) {
-        currentHour = 0;
-        currentDay++;
-      }
-    }
-  }
+
+  DateTime now = rtc.now();
+  currentHour   = now.hour();
+  currentMinute = now.minute();
+  currentSecond = now.second();
+  currentDay    = now.day();
+  currentMonth  = now.month();
+  currentYear   = now.year();
 
   if (currentScreen == TIME_SCREEN) {
     updateTimeOnly();
@@ -753,7 +755,7 @@ void checkAlarm() {
         displayOn = true;
         digitalWrite(TFT_LED, HIGH); // Sáng đèn nền nếu đang tắt
         currentScreen = RINGING_SCREEN;
-        
+
         drawRingingScreen();
         tone(BUZZER_PIN, 1000);
         break;
@@ -772,17 +774,23 @@ void setup() {
   pinMode(TFT_LED, OUTPUT);
   digitalWrite(TFT_LED, HIGH);
 
-  // BẮT BUỘC KHỞI TẠO HARDWARE SPI TRÊN ESP32-S3
+  // Khởi tạo SPI và I2C cho ESP32-S3
   SPI.begin(TFT_SCLK, TFT_MISO, TFT_MOSI, TFT_CS);
+  Wire.begin(I2C_SDA, I2C_SCL);
 
-  tft.begin(); 
+  tft.begin();
   tft.setRotation(1);
   tft.fillScreen(BLACK);
+
+  // Khởi tạo RTC DS3231
+  if (!rtc.begin()) {
+    Serial.println("Loi: Khong tim thấy DS3231!");
+  }
 
   pinMode(BUTTON_PIN, INPUT_PULLUP);
   pinMode(ROTARY_CLK, INPUT_PULLUP);
   pinMode(ROTARY_DT, INPUT_PULLUP);
-  
+
   pinMode(BUZZER_PIN, OUTPUT);
   noTone(BUZZER_PIN);
 
@@ -792,19 +800,30 @@ void setup() {
   lastButtonState = digitalRead(BUTTON_PIN);
   lastFlickerableState = lastButtonState;
 
-  currentHour = 0;
-  currentMinute = 0;
-  currentSecond = 0;
-  clockRunning = false; 
-  timeEditField = 0;
-
   displayOn = true;
-  currentScreen = SET_TIME_SCREEN;
   lastActivityTime = millis();
-  
-  drawSetTimeScreen();
 
-  Serial.println("SMART CLOCK READY - HARDWARE SPI RUNNING");
+  // Kiểm tra nếu RTC đã chạy, tự động chuyển vào màn hình xem giờ
+  if (rtc.lostPower()) {
+    Serial.println("RTC bi mat nguon, yeu cau cai dat lai gio!");
+    clockRunning = false;
+    currentScreen = SET_TIME_SCREEN;
+    drawSetTimeScreen();
+  } else {
+    DateTime now = rtc.now();
+    currentHour   = now.hour();
+    currentMinute = now.minute();
+    currentSecond = now.second();
+    currentDay    = now.day();
+    currentMonth  = now.month();
+    currentYear   = now.year();
+
+    clockRunning = true;
+    currentScreen = TIME_SCREEN;
+    drawTimeScreen();
+  }
+
+  Serial.println("SMART CLOCK READY - HARDWARE SPI & RTC DS3231 RUNNING");
 }
 
 // ============================================================
@@ -815,7 +834,7 @@ void loop() {
   handleButton();
   checkClickTimeout();
   handleRotary();
-  updateBlink();       
+  updateBlink();
   checkAlarm();
   checkDisplayTimeout();
 }
