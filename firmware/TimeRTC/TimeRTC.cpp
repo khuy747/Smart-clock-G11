@@ -1,222 +1,61 @@
 #include "TimeRTC.h"
+
 #include <Wire.h>
 #include <RTClib.h>
 
-static RTC_DS3231 rtc;
+RTC_DS3231 rtc;
 
 
-// =====================================================
+// ========================================
 // CONSTRUCTOR
-// =====================================================
+// ========================================
 
-TimeRTC::TimeRTC(
-    uint8_t upPin,
-    uint8_t downPin,
-    uint8_t setPin
-)
+TimeRTC::TimeRTC()
 {
-    _upPin = upPin;
-    _downPin = downPin;
-    _setPin = setPin;
 }
 
 
-// =====================================================
+// ========================================
 // BEGIN
-// =====================================================
+// ========================================
 
-bool TimeRTC::begin(
-    uint8_t sdaPin,
-    uint8_t sclPin
-)
+bool TimeRTC::begin(uint8_t sda, uint8_t scl)
 {
-    // I2C
-    Wire.begin(sdaPin, sclPin);
+    Wire.begin(sda, scl);
 
-    // Buttons
-    pinMode(_upPin, INPUT_PULLUP);
-    pinMode(_downPin, INPUT_PULLUP);
-    pinMode(_setPin, INPUT_PULLUP);
-
-    // RTC
     if (!rtc.begin())
+    {
         return false;
+    }
 
     return true;
 }
 
 
-// =====================================================
-// SET TIME
-// =====================================================
+// ========================================
+// SET DATETIME
+// ========================================
 
-void TimeRTC::setTime()
+bool TimeRTC::setDateTime(
+    uint16_t year,
+    uint8_t month,
+    uint8_t day,
+    uint8_t hour,
+    uint8_t minute,
+    uint8_t second
+)
 {
-    int day = 1;
-    int month = 1;
-    int year = 2026;
-
-    int hour = 0;
-    int minute = 0;
-
-    // 0 = day
-    // 1 = month
-    // 2 = year
-    // 3 = hour
-    // 4 = minute
-    int item = 0;
-
-
-    while (item < 5)
+    // Kiểm tra dữ liệu trước khi ghi
+    if (!isValidDateTime(
+            year,
+            month,
+            day,
+            hour,
+            minute,
+            second))
     {
-        // =================================================
-        // UP
-        // =================================================
-
-        if (digitalRead(_upPin) == LOW)
-        {
-            switch (item)
-            {
-                case 0:
-                    day++;
-
-                    if (day > daysInMonth(month, year))
-                        day = 1;
-
-                    break;
-
-
-                case 1:
-                    month++;
-
-                    if (month > 12)
-                        month = 1;
-
-                    if (day > daysInMonth(month, year))
-                        day = daysInMonth(month, year);
-
-                    break;
-
-
-                case 2:
-                    year++;
-
-                    if (year > 2099)
-                        year = 2000;
-
-                    if (day > daysInMonth(month, year))
-                        day = daysInMonth(month, year);
-
-                    break;
-
-
-                case 3:
-                    hour++;
-
-                    if (hour > 23)
-                        hour = 0;
-
-                    break;
-
-
-                case 4:
-                    minute++;
-
-                    if (minute > 59)
-                        minute = 0;
-
-                    break;
-            }
-
-            delay(200);
-        }
-
-
-        // =================================================
-        // DOWN
-        // =================================================
-
-        if (digitalRead(_downPin) == LOW)
-        {
-            switch (item)
-            {
-                case 0:
-                    day--;
-
-                    if (day < 1)
-                        day = daysInMonth(month, year);
-
-                    break;
-
-
-                case 1:
-                    month--;
-
-                    if (month < 1)
-                        month = 12;
-
-                    if (day > daysInMonth(month, year))
-                        day = daysInMonth(month, year);
-
-                    break;
-
-
-                case 2:
-                    year--;
-
-                    if (year < 2000)
-                        year = 2099;
-
-                    if (day > daysInMonth(month, year))
-                        day = daysInMonth(month, year);
-
-                    break;
-
-
-                case 3:
-                    hour--;
-
-                    if (hour < 0)
-                        hour = 23;
-
-                    break;
-
-
-                case 4:
-                    minute--;
-
-                    if (minute < 0)
-                        minute = 59;
-
-                    break;
-            }
-
-            delay(200);
-        }
-
-
-        // =================================================
-        // SET / NEXT
-        // =================================================
-
-        if (digitalRead(_setPin) == LOW)
-        {
-            item++;
-
-            delay(200);
-
-            // Chờ thả nút
-            while (digitalRead(_setPin) == LOW)
-            {
-                delay(10);
-            }
-        }
+        return false;
     }
-
-
-    // =================================================
-    // SAVE TO DS3231
-    // =================================================
 
     rtc.adjust(
         DateTime(
@@ -225,15 +64,17 @@ void TimeRTC::setTime()
             day,
             hour,
             minute,
-            0
+            second
         )
     );
+
+    return true;
 }
 
 
-// =====================================================
+// ========================================
 // GET TIME
-// =====================================================
+// ========================================
 
 TimeData TimeRTC::getTime()
 {
@@ -241,55 +82,48 @@ TimeData TimeRTC::getTime()
 
     TimeData data;
 
-    data.day = now.day();
-    data.month = now.month();
-    data.year = now.year();
-
-    data.hour = now.hour();
-    data.minute = now.minute();
     data.second = now.second();
+    data.minute = now.minute();
+    data.hour   = now.hour();
+
+    data.day   = now.day();
+    data.month = now.month();
+    data.year  = now.year();
 
     return data;
 }
 
 
-// =====================================================
-// DAYS IN MONTH
-// =====================================================
+// ========================================
+// VALIDATE DATETIME
+// ========================================
 
-int TimeRTC::daysInMonth(
-    int month,
-    int year
+bool TimeRTC::isValidDateTime(
+    uint16_t year,
+    uint8_t month,
+    uint8_t day,
+    uint8_t hour,
+    uint8_t minute,
+    uint8_t second
 )
 {
-    // February
-    if (month == 2)
-    {
-        // Leap year
-        if (
-            (year % 4 == 0 && year % 100 != 0) ||
-            (year % 400 == 0)
-        )
-        {
-            return 29;
-        }
+    if (year < 2000 || year > 2099)
+        return false;
 
-        return 28;
-    }
+    if (month < 1 || month > 12)
+        return false;
 
+    if (day < 1 || day > 31)
+        return false;
 
-    // 30-day months
-    if (
-        month == 4 ||
-        month == 6 ||
-        month == 9 ||
-        month == 11
-    )
-    {
-        return 30;
-    }
+    if (hour > 23)
+        return false;
 
+    if (minute > 59)
+        return false;
 
-    // 31-day months
-    return 31;
+    if (second > 59)
+        return false;
+
+    return true;
 }

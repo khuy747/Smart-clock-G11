@@ -1,39 +1,50 @@
-#ifndef TIME_RTC_H
-#define TIME_RTC_H
+#ifndef TIMERTC_H
+#define TIMERTC_H
 
 #include <Arduino.h>
 
-struct TimeData {
-    int day;
-    int month;
-    int year;
+struct TimeData
+{
+    uint8_t second;
+    uint8_t minute;
+    uint8_t hour;
 
-    int hour;
-    int minute;
-    int second;
+    uint8_t day;
+    uint8_t month;
+    uint16_t year;
 };
 
-class TimeRTC {
+class TimeRTC
+{
 public:
-    TimeRTC(uint8_t upPin, uint8_t downPin, uint8_t setPin);
+    TimeRTC();
 
-    // Khởi tạo DS3231 + 3 nút
-    bool begin(uint8_t sdaPin, uint8_t sclPin);
+    // Khởi tạo DS3231
+    bool begin(uint8_t sda, uint8_t scl);
 
-    // Nhập và lưu thời gian vào DS3231
-    // Gọi 1 lần khi cần cài giờ
-    void setTime();
+    // Ghi thời gian mới vào DS3231
+    // Có thể được gọi từ Web hoặc Input
+    bool setDateTime(
+        uint16_t year,
+        uint8_t month,
+        uint8_t day,
+        uint8_t hour,
+        uint8_t minute,
+        uint8_t second
+    );
 
-    // Lấy thời gian hiện tại từ DS3231
-    // Có thể gọi liên tục
+    // Đọc thời gian hiện tại
     TimeData getTime();
 
 private:
-    uint8_t _upPin;
-    uint8_t _downPin;
-    uint8_t _setPin;
-
-    int daysInMonth(int month, int year);
+    bool isValidDateTime(
+        uint16_t year,
+        uint8_t month,
+        uint8_t day,
+        uint8_t hour,
+        uint8_t minute,
+        uint8_t second
+    );
 };
 
 #endif
