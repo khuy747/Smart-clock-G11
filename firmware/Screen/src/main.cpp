@@ -15,10 +15,9 @@
 #define TFT_MISO   13
 #define TFT_LED     7  // Chân điều khiển đèn nền màn hình
 
-#define BUTTON_PIN  4
-#define ROTARY_CLK  1
-#define ROTARY_DT   2
-#define BUZZER_PIN 41
+#define BUTTON_PIN  4  // Nút bấm đơn chuyển trang/xác nhận
+#define POT_PIN     1  // Chân đọc BIẾN TRỞ (Analog ADC GPIO 1)
+#define BUZZER_PIN 41  // Còi báo thức
 
 // Chân I2C cho DS3231 RTC
 #define I2C_SDA     5
@@ -68,7 +67,7 @@ unsigned long lastActivityTime = 0;
 const unsigned long SCREEN_TIMEOUT = 60000;
 
 // ============================================================
-//                           CLOCK
+//                          CLOCK
 // ============================================================
 bool clockRunning = false;
 int currentHour   = 0;
@@ -76,8 +75,8 @@ int currentMinute = 0;
 int currentSecond = 0;
 int lastMinuteDrawn = -1;
 
-int currentDay   = 28;
-int currentMonth = 7;
+int currentDay   = 19;
+int currentMonth = 8;
 int currentYear  = 2026;
 unsigned long lastClockUpdate = 0;
 
@@ -115,7 +114,7 @@ unsigned long lastBlinkTime = 0;
 const unsigned long BLINK_INTERVAL = 500;
 
 // ============================================================
-//                   BUTTON DEBOUNCE
+//                  BUTTON DEBOUNCE
 // ============================================================
 bool lastButtonState = HIGH;
 bool lastFlickerableState = HIGH;
@@ -130,13 +129,7 @@ unsigned long clickActionStartTime = 0;
 const unsigned long CLICK_TIMEOUT = 300;
 
 // ============================================================
-//                           ROTARY
-// ============================================================
-int rotaryLastState = 0;
-int rotaryAccumulator = 0;
-
-// ============================================================
-//                           TODO
+//                          TODO
 // ============================================================
 struct Task {
   int hour;
@@ -261,8 +254,8 @@ void drawSetTimeScreen() {
   else tft.print("Chinh Phut");
 
   tft.setTextSize(1);
-  tft.setCursor(40, 215);
-  tft.print("XOAY: CHINH | 1 LAN: LUU DS3231");
+  tft.setCursor(30, 215);
+  tft.print("XOAY BIEN TRO: CHINH | 1 CLICK: LUU");
 }
 
 // ============================================================
@@ -433,8 +426,8 @@ void drawAlarmScreen() {
 
     tft.setTextSize(1);
     tft.setTextColor(YELLOW);
-    tft.setCursor(45, 195);
-    tft.print("XOAY: CHUYEN BAO THUC KHAC");
+    tft.setCursor(35, 195);
+    tft.print("XOAY BIEN TRO: CHUYEN BAO THUC");
 
     tft.setTextSize(1);
     tft.setTextColor(GREY);
@@ -449,8 +442,8 @@ void drawAlarmScreen() {
 
     tft.setTextSize(1);
     tft.setTextColor(GREY);
-    tft.setCursor(30, 210);
-    tft.print("XOAY: CHINH | 1 LAN: LUU | 2 LAN: OUT");
+    tft.setCursor(20, 210);
+    tft.print("XOAY: CHINH | 1 CLICK: LUU | 2 CLICK: OUT");
   }
 }
 
@@ -496,59 +489,48 @@ void drawRingingScreen() {
 }
 
 // ============================================================
-//                    HANDLE ROTARY
+//               HANDLE POTENTIOMETER (BIẾN TRỞ)
 // ============================================================
-void handleRotary() {
-  int clk = digitalRead(ROTARY_CLK);
-  int dt = digitalRead(ROTARY_DT);
-  int currentState = (clk << 1) | dt;
+void handlePotentiometer() {
+  static unsigned long lastPotRead = 0;
+  // Đọc biến trở mỗi 80ms để hạn chế giật màn hình và chống nhiễu
+  if (millis() - lastPotRead < 80) return;
+  lastPotRead = millis();
 
-  if (currentState == rotaryLastState) return;
-
-  int movement = 0;
-  if ((rotaryLastState == 0 && currentState == 1) ||
-      (rotaryLastState == 1 && currentState == 3) ||
-      (rotaryLastState == 3 && currentState == 2) ||
-      (rotaryLastState == 2 && currentState == 0)) {
-    movement = 1;
-  }
-  else if ((rotaryLastState == 0 && currentState == 2) ||
-           (rotaryLastState == 2 && currentState == 3) ||
-           (rotaryLastState == 3 && currentState == 1) ||
-           (rotaryLastState == 1 && currentState == 0)) {
-    movement = -1;
-  }
-
-  rotaryLastState = currentState;
-  if (movement == 0) return;
-
-  rotaryAccumulator += movement;
-  if (abs(rotaryAccumulator) < 4) return;
-
-  int direction = rotaryAccumulator > 0 ? 1 : -1;
-  rotaryAccumulator = 0;
+  int rawPot = analogRead(POT_PIN); // Đọc giá trị ADC từ 0 - 4095
 
   if (!displayOn) return;
-  registerActivity();
 
+  // --- 1. MÀN HÌNH CÀI ĐẶT THỜI GIAN ---
   if (currentScreen == SET_TIME_SCREEN) {
-    if (timeEditField == 0) {
-      currentHour += direction;
-      if (currentHour > 23) currentHour = 0;
-      if (currentHour < 0) currentHour = 23;
-    } else {
-      currentMinute += direction;
-      if (currentMinute > 59) currentMinute = 0;
-      if (currentMinute < 0) currentMinute = 59;
+    if (timeEditField == 0) { // Chỉnh GIỜ
+      int newHour = map(rawPot, 0, 4095, 0, 23);
+      newHour = constrain(newHour, 0, 23);
+      if (newHour != currentHour) {
+        currentHour = newHour;
+        registerActivity();
+        drawSetTimeDigits();
+      }
+    } else { // Chỉnh PHÚT
+      int newMinute = map(rawPot, 0, 4095, 0, 59);
+      newMinute = constrain(newMinute, 0, 59);
+      if (newMinute != currentMinute) {
+        currentMinute = newMinute;
+        registerActivity();
+        drawSetTimeDigits();
+      }
     }
-    drawSetTimeDigits();
   }
+  // --- 2. MÀN HÌNH DANH SÁCH TODO ---
   else if (currentScreen == TODO_SCREEN) {
-    int oldSelectedTask = selectedTask;
-    if (direction > 0 && selectedTask < TASK_COUNT - 1) selectedTask++;
-    else if (direction < 0 && selectedTask > 0) selectedTask--;
+    int newSelect = map(rawPot, 0, 4095, 0, TASK_COUNT - 1);
+    newSelect = constrain(newSelect, 0, TASK_COUNT - 1);
 
-    if (oldSelectedTask != selectedTask) {
+    if (newSelect != selectedTask) {
+      registerActivity();
+      int oldSelectedTask = selectedTask;
+      selectedTask = newSelect;
+
       bool needFullRedraw = false;
       if (selectedTask < topTaskIndex) {
         topTaskIndex = selectedTask;
@@ -565,28 +547,37 @@ void handleRotary() {
       }
     }
   }
+  // --- 3. MÀN HÌNH CÀI BÁO THỨC ---
   else if (currentScreen == ALARM_SCREEN) {
-    if (alarmEditField == 2) {
-      currentAlarmIndex += direction;
-      if (currentAlarmIndex >= MAX_ALARMS) currentAlarmIndex = 0;
-      if (currentAlarmIndex < 0) currentAlarmIndex = MAX_ALARMS - 1;
-
-      alarmEditField = 0;
-      blinkState = true;
-      lastBlinkTime = millis();
-      drawAlarmScreen();
-    }
-    else {
-      if (alarmEditField == 0) {
-        alarms[currentAlarmIndex].hour += direction;
-        if (alarms[currentAlarmIndex].hour > 23) alarms[currentAlarmIndex].hour = 0;
-        if (alarms[currentAlarmIndex].hour < 0) alarms[currentAlarmIndex].hour = 23;
-      } else {
-        alarms[currentAlarmIndex].minute += direction;
-        if (alarms[currentAlarmIndex].minute > 59) alarms[currentAlarmIndex].minute = 0;
-        if (alarms[currentAlarmIndex].minute < 0) alarms[currentAlarmIndex].minute = 59;
+    if (alarmEditField == 0) { // Chỉnh Giờ Báo Thức
+      int newHour = map(rawPot, 0, 4095, 0, 23);
+      newHour = constrain(newHour, 0, 23);
+      if (newHour != alarms[currentAlarmIndex].hour) {
+        alarms[currentAlarmIndex].hour = newHour;
+        registerActivity();
+        drawAlarmDigits();
       }
-      drawAlarmDigits();
+    }
+    else if (alarmEditField == 1) { // Chỉnh Phút Báo Thức
+      int newMinute = map(rawPot, 0, 4095, 0, 59);
+      newMinute = constrain(newMinute, 0, 59);
+      if (newMinute != alarms[currentAlarmIndex].minute) {
+        alarms[currentAlarmIndex].minute = newMinute;
+        registerActivity();
+        drawAlarmDigits();
+      }
+    }
+    else if (alarmEditField == 2) { // Chuyển chọn báo thức 1 - 5
+      int newIdx = map(rawPot, 0, 4095, 0, MAX_ALARMS - 1);
+      newIdx = constrain(newIdx, 0, MAX_ALARMS - 1);
+      if (newIdx != currentAlarmIndex) {
+        currentAlarmIndex = newIdx;
+        alarmEditField = 0;
+        blinkState = true;
+        lastBlinkTime = millis();
+        registerActivity();
+        drawAlarmScreen();
+      }
     }
   }
 }
@@ -782,28 +773,36 @@ void setup() {
   tft.setRotation(1);
   tft.fillScreen(BLACK);
 
-  // Khởi tạo RTC DS3231
-  if (!rtc.begin()) {
-    Serial.println("Loi: Khong tim thấy DS3231!");
-  }
-
+  // Khai báo chân nút bấm & Biến trở
   pinMode(BUTTON_PIN, INPUT_PULLUP);
-  pinMode(ROTARY_CLK, INPUT_PULLUP);
-  pinMode(ROTARY_DT, INPUT_PULLUP);
+  pinMode(POT_PIN, INPUT);
+  analogReadResolution(12); // Thiết lập ADC 12-bit (0 - 4095)
 
   pinMode(BUZZER_PIN, OUTPUT);
   noTone(BUZZER_PIN);
 
-  int clk = digitalRead(ROTARY_CLK);
-  int dt = digitalRead(ROTARY_DT);
-  rotaryLastState = (clk << 1) | dt;
   lastButtonState = digitalRead(BUTTON_PIN);
   lastFlickerableState = lastButtonState;
 
   displayOn = true;
   lastActivityTime = millis();
 
-  // Kiểm tra nếu RTC đã chạy, tự động chuyển vào màn hình xem giờ
+  // Khởi tạo RTC DS3231 và kiểm tra báo lỗi
+  if (!rtc.begin()) {
+    Serial.println("Loi: Khong tim thấy DS3231!");
+    tft.fillScreen(BLACK);
+    tft.setTextColor(RED);
+    tft.setTextSize(2);
+    tft.setCursor(20, 100);
+    tft.print("LOI: KHONG THAY RTC!");
+    tft.setCursor(20, 130);
+    tft.setTextColor(WHITE);
+    tft.setTextSize(1);
+    tft.print("Kiem tra lai day SDA (GPIO5) & SCL (GPIO6)");
+    while (1);
+  }
+
+  // Kiểm tra nếu RTC đã chạy hay bị mất nguồn
   if (rtc.lostPower()) {
     Serial.println("RTC bi mat nguon, yeu cau cai dat lai gio!");
     clockRunning = false;
@@ -823,7 +822,7 @@ void setup() {
     drawTimeScreen();
   }
 
-  Serial.println("SMART CLOCK READY - HARDWARE SPI & RTC DS3231 RUNNING");
+  Serial.println("SMART CLOCK READY - POTENTIOMETER & RTC DS3231 RUNNING");
 }
 
 // ============================================================
@@ -833,7 +832,7 @@ void loop() {
   updateClock();
   handleButton();
   checkClickTimeout();
-  handleRotary();
+  handlePotentiometer();
   updateBlink();
   checkAlarm();
   checkDisplayTimeout();
