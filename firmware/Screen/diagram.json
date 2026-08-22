@@ -3,34 +3,61 @@
   "author": "Smart Clock ESP32-S3 Corrected",
   "editor": "wokwi",
   "parts": [
-    { "type": "board-esp32-s3-devkitc-1", "id": "esp", "top": 28.62, "left": 71.77, "attrs": {} },
+    {
+      "type": "board-esp32-s3-devkitc-1",
+      "id": "esp",
+      "top": 0,
+      "left": 0,
+      "attrs": {}
+    },
     {
       "type": "wokwi-ili9341",
       "id": "lcd1",
-      "top": -244.7,
-      "left": 145.2,
+      "top": -250,
+      "left": 150,
       "rotate": 90,
       "attrs": {}
     },
-    { "type": "wokwi-ky-040", "id": "encoder1", "top": 59.3, "left": -87.2, "attrs": {} },
     {
       "type": "wokwi-buzzer",
       "id": "bz1",
-      "top": -7.2,
-      "left": 213,
-      "attrs": { "volume": "0.1" }
+      "top": -30,
+      "left": 230,
+      "attrs": {
+        "volume": "0.1"
+      }
+    },
+    {
+      "type": "wokwi-ds1307",
+      "id": "rtc",
+      "top": 200,
+      "left": 180,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-potentiometer",
+      "id": "pot1",
+      "top": 180,
+      "left": -120,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-pushbutton",
+      "id": "btn1",
+      "top": 90,
+      "left": -100,
+      "attrs": {
+        "color": "green"
+      }
     }
   ],
   "connections": [
     [ "esp:TX", "$serialMonitor:RX", "", [] ],
     [ "esp:RX", "$serialMonitor:TX", "", [] ],
-    [ "bz1:2", "esp:41", "green", [ "v0" ] ],
+
+    [ "bz1:2", "esp:41", "orange", [ "v0" ] ],
     [ "bz1:1", "esp:GND.2", "black", [ "v0" ] ],
-    [ "encoder1:GND", "esp:GND.1", "black", [ "h0" ] ],
-    [ "encoder1:VCC", "esp:3V3.1", "red", [ "h0" ] ],
-    [ "encoder1:CLK", "esp:1", "green", [ "h0" ] ],
-    [ "encoder1:DT", "esp:2", "green", [ "h0" ] ],
-    [ "encoder1:SW", "esp:4", "green", [ "h0" ] ],
+
     [ "lcd1:VCC", "esp:3V3.1", "red", [ "h0" ] ],
     [ "lcd1:GND", "esp:GND.1", "black", [ "h0" ] ],
     [ "lcd1:CS", "esp:10", "green", [ "h0" ] ],
@@ -38,7 +65,20 @@
     [ "lcd1:D/C", "esp:9", "green", [ "h0" ] ],
     [ "lcd1:MOSI", "esp:11", "green", [ "h0" ] ],
     [ "lcd1:SCK", "esp:12", "green", [ "h0" ] ],
-    [ "lcd1:LED", "esp:3V3.1", "red", [ "h0" ] ]
+    [ "lcd1:MISO", "esp:13", "green", [ "h0" ] ],
+    [ "lcd1:LED", "esp:7", "purple", [ "h0" ] ],
+
+    [ "rtc:5V", "esp:3V3.1", "red", [ "v20", "h-40" ] ],
+    [ "rtc:GND", "esp:GND.1", "black", [ "v30", "h-50" ] ],
+    [ "rtc:SDA", "esp:5", "blue", [ "v-20" ] ],
+    [ "rtc:SCL", "esp:6", "yellow", [ "v-30" ] ],
+
+    [ "pot1:VCC", "esp:3V3.1", "red", [ "v-40", "h100" ] ],
+    [ "pot1:GND", "esp:GND.1", "black", [ "v-50", "h120" ] ],
+    [ "pot1:SIG", "esp:1", "cyan", [ "v-60", "h140" ] ],
+
+    [ "btn1:2.l", "esp:GND.1", "black", [ "h-20", "v50", "h160" ] ],
+    [ "btn1:1.l", "esp:4", "green", [ "h-30", "v80", "h150" ] ]
   ],
   "dependencies": {}
 }

@@ -107,3 +107,5 @@ docs/_build/
 # *-backups/
 # fp-info-cache
 # *.kicad_prl
+
+.pio

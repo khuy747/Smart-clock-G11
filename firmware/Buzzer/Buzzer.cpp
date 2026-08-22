@@ -1,23 +1,16 @@
 #include "Buzzer.h"
 
-#define BUZZER_PIN 4
+#define BUZZER_PIN 41
 
-
-void buzzerBegin()
-{
-    ledcAttach(BUZZER_PIN, 1000, 8);
-
-    ledcWriteTone(BUZZER_PIN, 0);
+void buzzerBegin() {
+    pinMode(BUZZER_PIN, OUTPUT);
+    noTone(BUZZER_PIN);
 }
 
-
-void playTone()
-{
-    ledcWriteTone(BUZZER_PIN, 1000);
+void playTone() {
+    tone(BUZZER_PIN, 1000);
 }
 
-
-void stopTone()
-{
-    ledcWriteTone(BUZZER_PIN, 0);
+void stopTone() {
+    noTone(BUZZER_PIN);
 }
